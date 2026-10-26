@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
+import AuthGuard from "../components/AuthGuard";
 import {
   Student,
   FeeRecord,
@@ -31,7 +32,8 @@ export default function ReportsPage() {
     }, 0);
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
+    <AuthGuard>
+      <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
       <main className="flex-1 flex flex-col h-full overflow-auto bg-[#F1F5F9]">
@@ -185,6 +187,7 @@ export default function ReportsPage() {
         </div>
       </main>
     </div>
-  );
+  </AuthGuard>
+);
 }
 

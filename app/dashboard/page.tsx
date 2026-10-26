@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import Sidebar from "../components/Sidebar";
+import AuthGuard from "../components/AuthGuard";
 import {
   Menu,
   ChevronDown,
@@ -21,9 +22,11 @@ import {
   Activity,
   STORAGE_KEYS,
   useStore,
+  User as UserType,
 } from "../lib/storage";
 
 export default function Dashboard() {
+  const [currentUser] = useStore<UserType | null>(STORAGE_KEYS.CURRENT_USER, null);
   const [students] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
   const [teachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
   const [classes] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
@@ -56,32 +59,37 @@ export default function Dashboard() {
       : { present: 0, absent: 0, leave: 0, total: 0 };
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
-      <Sidebar />
+    <AuthGuard>
+      <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
+        <Sidebar />
 
-      <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#F1F5F9]">
-        {/* TOP BAR */}
-        <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm">
-          <div className="flex items-center gap-3">
-            <Menu className="text-slate-500 cursor-pointer" size={18} />
-            <h1 className="font-semibold text-base text-slate-800 tracking-wide">
-              Dashboard Overview
-            </h1>
-          </div>
-          <div className="flex items-center gap-3 cursor-pointer select-none">
-            <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-bold text-xs">
-              AD
+        <main className="flex-1 flex flex-col h-full overflow-hidden bg-[#F1F5F9]">
+          {/* TOP BAR */}
+          <header className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0 shadow-sm">
+            <div className="flex items-center gap-3">
+              <Menu className="text-slate-500 cursor-pointer" size={18} />
+              <h1 className="font-semibold text-base text-slate-800 tracking-wide">
+                Dashboard Overview
+              </h1>
             </div>
-            <div className="flex flex-col text-left leading-none">
-              <span className="text-xs font-semibold text-slate-700">Admin</span>
-              <span className="text-[10px] text-slate-400">School Admin</span>
+            <div className="flex items-center gap-3 cursor-pointer select-none">
+              <div className="w-8 h-8 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center font-bold text-xs">
+                {currentUser?.name ? currentUser.name.slice(0, 2).toUpperCase() : "AD"}
+              </div>
+              <div className="flex flex-col text-left leading-none">
+                <span className="text-xs font-semibold text-slate-700">
+                  {currentUser?.name || "Admin"}
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  {currentUser?.role || "School Admin"}
+                </span>
+              </div>
+              <ChevronDown size={14} className="text-slate-400" />
             </div>
-            <ChevronDown size={14} className="text-slate-400" />
-          </div>
-        </header>
+          </header>
 
-        {/* CONTENT */}
-        <div className="flex-1 overflow-auto p-6 max-w-6xl w-full mx-auto">
+          {/* CONTENT */}
+          <div className="flex-1 overflow-auto p-6 max-w-6xl w-full mx-auto">
           {/* STATS CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
             <StatCard
@@ -290,7 +298,8 @@ export default function Dashboard() {
         </div>
       </main>
     </div>
-  );
+  </AuthGuard>
+);
 }
 
 function StatCard({

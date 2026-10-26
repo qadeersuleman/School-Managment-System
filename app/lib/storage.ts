@@ -55,6 +55,15 @@ export type Activity = {
   user: string;
 };
 
+export type User = {
+  id: string;
+  name: string;
+  email: string;
+  password?: string;
+  role: "Admin" | "Teacher" | "Staff";
+  createdAt: string;
+};
+
 // Storage Keys
 export const STORAGE_KEYS = {
   STUDENTS: "sms_students",
@@ -63,6 +72,8 @@ export const STORAGE_KEYS = {
   FEES: "sms_fees",
   ATTENDANCE: "sms_attendance",
   ACTIVITIES: "sms_activities",
+  USERS: "sms_users",
+  CURRENT_USER: "sms_current_user",
 };
 
 // In-memory cache for useSyncExternalStore snapshot consistency
@@ -235,5 +246,119 @@ export function clearAllData(): void {
     delete memoryCache[k];
   });
   window.dispatchEvent(new Event("sms_storage_change"));
+}
+
+// --- AUTHENTICATION ---
+export function getUsers(): User[] {
+  return getCached<User[]>(STORAGE_KEYS.USERS, []);
+}
+
+export function saveUsers(users: User[]): void {
+  setCached(STORAGE_KEYS.USERS, users);
+}
+
+export function getCurrentUser(): User | null {
+  return getCached<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+}
+
+export function setCurrentUser(user: User | null): void {
+  setCached(STORAGE_KEYS.CURRENT_USER, user);
+}
+
+export function registerUser(data: {
+  name: string;
+  email: string;
+  password?: string;
+  role?: "Admin" | "Teacher" | "Staff";
+}): { success: boolean; message: string; user?: User } {
+  const users = getUsers();
+  const normalizedEmail = data.email.trim().toLowerCase();
+
+  if (users.some((u) => u.email.toLowerCase() === normalizedEmail)) {
+    return { success: false, message: "An account with this email already exists." };
+  }
+
+  const newUser: User = {
+    id: `USR-${String(Date.now()).slice(-6)}`,
+    name: data.name.trim(),
+    email: normalizedEmail,
+    password: data.password || "123456",
+    role: data.role || "Admin",
+    createdAt: new Date().toISOString(),
+  };
+
+  const updated = [...users, newUser];
+  saveUsers(updated);
+  setCurrentUser({
+    id: newUser.id,
+    name: newUser.name,
+    email: newUser.email,
+    role: newUser.role,
+    createdAt: newUser.createdAt,
+  });
+  logActivity(`New user registered: ${newUser.name} (${newUser.role})`, newUser.name);
+  return { success: true, message: "Account created successfully!", user: newUser };
+}
+
+export function loginUser(
+  email: string,
+  pass: string
+): { success: boolean; message: string; user?: User } {
+  const users = getUsers();
+  const normalizedEmail = email.trim().toLowerCase();
+
+  // Allow default admin credentials for instant testing
+  if (normalizedEmail === "admin@sms.com" && pass === "admin123") {
+    let adminUser = users.find((u) => u.email.toLowerCase() === "admin@sms.com");
+    if (!adminUser) {
+      adminUser = {
+        id: "USR-000001",
+        name: "System Admin",
+        email: "admin@sms.com",
+        password: "admin123",
+        role: "Admin",
+        createdAt: new Date().toISOString(),
+      };
+      saveUsers([...users, adminUser]);
+    }
+    const sessionUser: User = {
+      id: adminUser.id,
+      name: adminUser.name,
+      email: adminUser.email,
+      role: adminUser.role,
+      createdAt: adminUser.createdAt,
+    };
+    setCurrentUser(sessionUser);
+    logActivity("Admin logged in", "System Admin");
+    return { success: true, message: "Welcome, System Admin!", user: sessionUser };
+  }
+
+  const found = users.find(
+    (u) => u.email.toLowerCase() === normalizedEmail && u.password === pass
+  );
+
+  if (!found) {
+    return { success: false, message: "Invalid email or password. Please try again." };
+  }
+
+  const sessionUser: User = {
+    id: found.id,
+    name: found.name,
+    email: found.email,
+    role: found.role,
+    createdAt: found.createdAt,
+  };
+
+  setCurrentUser(sessionUser);
+  logActivity(`User logged in: ${found.name}`, found.name);
+  return { success: true, message: `Welcome back, ${found.name}!`, user: sessionUser };
+}
+
+export function logoutUser(): void {
+  const user = getCurrentUser();
+  if (user) {
+    logActivity(`User logged out: ${user.name}`, user.name);
+  }
+  setCurrentUser(null);
 }
 

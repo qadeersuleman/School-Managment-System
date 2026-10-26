@@ -4,6 +4,7 @@ import React, { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
+import AuthGuard from "../components/AuthGuard";
 import { TeacherAvatarIllustration } from "../components/Illustrations";
 import {
   Teacher,
@@ -176,7 +177,8 @@ export default function TeacherManagement() {
   );
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
+    <AuthGuard>
+      <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
       <main className="flex-1 flex flex-col h-full overflow-auto bg-[#F1F5F9]">
@@ -416,6 +418,7 @@ export default function TeacherManagement() {
         </div>
       </main>
     </div>
-  );
+  </AuthGuard>
+);
 }
 

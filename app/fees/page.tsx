@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
+import AuthGuard from "../components/AuthGuard";
 import { FeeIllustration } from "../components/Illustrations";
 import {
   FeeRecord,
@@ -60,7 +61,7 @@ export default function FeeManagement() {
     studentName: "",
     feeMonth: "May 2024",
     amount: "5000",
-    paymentDate: new Date().toISOString().split("T")[0],
+    paymentDate: "",
     status: "Paid",
   });
 
@@ -109,7 +110,8 @@ export default function FeeManagement() {
       return;
     }
 
-    const newRecord: FeeRecord = { ...formData, id: feeId };
+    const paymentDate = formData.paymentDate || new Date().toISOString().split("T")[0];
+    const newRecord: FeeRecord = { ...formData, id: feeId, paymentDate };
     const updated = [...fees, newRecord];
     setFees(updated);
     logActivity(`Recorded fee payment of Rs. ${newRecord.amount} for ${newRecord.studentName}`);
@@ -164,7 +166,7 @@ export default function FeeManagement() {
       studentName: "",
       feeMonth: "May 2024",
       amount: "5000",
-      paymentDate: new Date().toISOString().split("T")[0],
+      paymentDate: "",
       status: "Paid",
     });
   };
@@ -197,7 +199,8 @@ export default function FeeManagement() {
   );
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
+    <AuthGuard>
+      <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
       <main className="flex-1 flex flex-col h-full overflow-auto bg-[#F1F5F9]">
@@ -434,6 +437,7 @@ export default function FeeManagement() {
         </div>
       </main>
     </div>
-  );
+  </AuthGuard>
+);
 }
 

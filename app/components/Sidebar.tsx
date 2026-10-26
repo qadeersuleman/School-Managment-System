@@ -15,10 +15,12 @@ import {
   LogOut,
 } from "lucide-react";
 import { confirmDialog, toastSuccess } from "../lib/alert";
+import { logoutUser, useStore, STORAGE_KEYS, User } from "../lib/storage";
 
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
 
   const navItems = [
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -39,8 +41,9 @@ export default function Sidebar() {
       icon: "question",
     });
     if (confirmed) {
+      logoutUser();
       toastSuccess("Logged out successfully");
-      router.push("/dashboard");
+      router.push("/login");
     }
   };
 
@@ -82,7 +85,22 @@ export default function Sidebar() {
       </nav>
 
       {/* Bottom Nav */}
-      <div className="py-4 px-3 border-t border-slate-700/50 space-y-1">
+      <div className="py-3 px-3 border-t border-slate-700/50 space-y-1">
+        {currentUser && (
+          <div className="px-3 py-2 mb-1 bg-slate-800/50 rounded-lg flex items-center gap-2.5 border border-slate-700/40">
+            <div className="w-7 h-7 rounded-full bg-blue-600/30 text-blue-400 border border-blue-500/30 flex items-center justify-center font-bold text-[10px] shrink-0">
+              {currentUser.name ? currentUser.name.slice(0, 2).toUpperCase() : "AD"}
+            </div>
+            <div className="flex flex-col leading-tight overflow-hidden">
+              <span className="text-white text-xs font-semibold truncate">
+                {currentUser.name || "Admin"}
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {currentUser.role || "Administrator"}
+              </span>
+            </div>
+          </div>
+        )}
         <Link
           href="/settings"
           className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-[13px] font-medium transition-colors ${

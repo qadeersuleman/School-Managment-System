@@ -1,7 +1,22 @@
+-- ==============================================================================
 -- Supabase PostgreSQL Schema for SMS (Student Management System)
--- Run this in the Supabase SQL Editor when you are ready to switch from LocalStorage to Supabase.
+-- ==============================================================================
+-- How to run:
+-- 1. In your Supabase Dashboard, open your project ("sms").
+-- 2. Click "SQL Editor" in the left sidebar.
+-- 3. Click "New query", paste this entire script, and click "Run".
+-- ==============================================================================
 
--- 1. Students Table
+-- 1. User Profiles / Accounts
+CREATE TABLE IF NOT EXISTS profiles (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  role TEXT CHECK (role IN ('Admin', 'Teacher', 'Staff')) DEFAULT 'Admin',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. Students Table
 CREATE TABLE IF NOT EXISTS students (
   id TEXT PRIMARY KEY, -- e.g. 'STU-0001'
   name TEXT NOT NULL,
@@ -15,7 +30,7 @@ CREATE TABLE IF NOT EXISTS students (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 2. Teachers Table
+-- 3. Teachers Table
 CREATE TABLE IF NOT EXISTS teachers (
   id TEXT PRIMARY KEY, -- e.g. 'TCH-0001'
   name TEXT NOT NULL,
@@ -26,7 +41,7 @@ CREATE TABLE IF NOT EXISTS teachers (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 3. Classes Table
+-- 4. Classes Table
 CREATE TABLE IF NOT EXISTS classes (
   id TEXT PRIMARY KEY, -- e.g. 'CLS-0001'
   name TEXT NOT NULL,
@@ -35,7 +50,7 @@ CREATE TABLE IF NOT EXISTS classes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Fees Table
+-- 5. Fees Table
 CREATE TABLE IF NOT EXISTS fees (
   id TEXT PRIMARY KEY, -- e.g. 'FEE-0001'
   student_id TEXT REFERENCES students(id) ON DELETE SET NULL,
@@ -47,7 +62,7 @@ CREATE TABLE IF NOT EXISTS fees (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Attendance Table
+-- 6. Attendance Table
 CREATE TABLE IF NOT EXISTS attendance (
   id BIGSERIAL PRIMARY KEY,
   student_id TEXT REFERENCES students(id) ON DELETE CASCADE,
@@ -58,7 +73,7 @@ CREATE TABLE IF NOT EXISTS attendance (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 6. Activities Table
+-- 7. Activity Logs Table
 CREATE TABLE IF NOT EXISTS activities (
   id BIGSERIAL PRIMARY KEY,
   date TEXT NOT NULL,
@@ -67,7 +82,10 @@ CREATE TABLE IF NOT EXISTS activities (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Enable Row Level Security (RLS) if needed
+-- ==============================================================================
+-- Row Level Security (RLS) Policies
+-- ==============================================================================
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teachers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
@@ -75,11 +93,29 @@ ALTER TABLE fees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 
--- Default public access policy for development/testing
-CREATE POLICY "Allow public read access" ON students FOR ALL USING (true);
-CREATE POLICY "Allow public read access" ON teachers FOR ALL USING (true);
-CREATE POLICY "Allow public read access" ON classes FOR ALL USING (true);
-CREATE POLICY "Allow public read access" ON fees FOR ALL USING (true);
-CREATE POLICY "Allow public read access" ON attendance FOR ALL USING (true);
-CREATE POLICY "Allow public read access" ON activities FOR ALL USING (true);
+-- Allow full access for API clients using anon key (ideal for development & direct frontend use)
+DROP POLICY IF EXISTS "Allow public access to profiles" ON profiles;
+CREATE POLICY "Allow public access to profiles" ON profiles FOR ALL USING (true);
 
+DROP POLICY IF EXISTS "Allow public access to students" ON students;
+CREATE POLICY "Allow public access to students" ON students FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow public access to teachers" ON teachers;
+CREATE POLICY "Allow public access to teachers" ON teachers FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow public access to classes" ON classes;
+CREATE POLICY "Allow public access to classes" ON classes FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow public access to fees" ON fees;
+CREATE POLICY "Allow public access to fees" ON fees FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow public access to attendance" ON attendance;
+CREATE POLICY "Allow public access to attendance" ON attendance FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Allow public access to activities" ON activities;
+CREATE POLICY "Allow public access to activities" ON activities FOR ALL USING (true);
+
+-- Insert Default Admin Profile
+INSERT INTO profiles (id, name, email, role)
+VALUES ('USR-000001', 'System Admin', 'admin@sms.com', 'Admin')
+ON CONFLICT (email) DO NOTHING;

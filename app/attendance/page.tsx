@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
+import AuthGuard from "../components/AuthGuard";
 import { AttendanceIllustration } from "../components/Illustrations";
 import {
   AttendanceRecord,
@@ -36,7 +37,7 @@ export default function AttendanceManagement() {
   }>({
     studentId: "",
     studentName: "",
-    date: new Date().toISOString().split("T")[0],
+    date: "",
     status: "Present",
     remarks: "",
   });
@@ -63,6 +64,8 @@ export default function AttendanceManagement() {
       return;
     }
 
+    const recordDate = formData.date || new Date().toISOString().split("T")[0];
+
     if (selectedId) {
       // Update existing record
       const updated = records.map((r) =>
@@ -71,7 +74,7 @@ export default function AttendanceManagement() {
               ...r,
               studentId: formData.studentId,
               studentName: formData.studentName,
-              date: formData.date,
+              date: recordDate,
               status: formData.status,
               remarks: formData.remarks,
             }
@@ -90,7 +93,7 @@ export default function AttendanceManagement() {
       id: newId,
       studentId: formData.studentId,
       studentName: formData.studentName,
-      date: formData.date,
+      date: recordDate,
       status: formData.status,
       remarks: formData.remarks,
     };
@@ -125,7 +128,7 @@ export default function AttendanceManagement() {
     setFormData({
       studentId: "",
       studentName: "",
-      date: new Date().toISOString().split("T")[0],
+      date: "",
       status: "Present",
       remarks: "",
     });
@@ -160,7 +163,8 @@ export default function AttendanceManagement() {
   );
 
   return (
-    <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
+    <AuthGuard>
+      <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
       <main className="flex-1 flex flex-col h-full overflow-auto bg-[#F1F5F9]">
@@ -367,6 +371,7 @@ export default function AttendanceManagement() {
         </div>
       </main>
     </div>
-  );
+  </AuthGuard>
+);
 }
 
