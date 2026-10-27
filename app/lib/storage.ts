@@ -60,7 +60,7 @@ export type User = {
   name: string;
   email: string;
   password?: string;
-  role: "Admin" | "Teacher" | "Staff";
+  role: "Admin" | "Teacher" | "Student";
   createdAt: string;
 };
 
@@ -269,7 +269,7 @@ export function registerUser(data: {
   name: string;
   email: string;
   password?: string;
-  role?: "Admin" | "Teacher" | "Staff";
+  role?: "Admin" | "Teacher" | "Student";
 }): { success: boolean; message: string; user?: User } {
   const users = getUsers();
   const normalizedEmail = data.email.trim().toLowerCase();
@@ -283,7 +283,7 @@ export function registerUser(data: {
     name: data.name.trim(),
     email: normalizedEmail,
     password: data.password || "123456",
-    role: data.role || "Admin",
+    role: data.role || "Student",
     createdAt: new Date().toISOString(),
   };
 
@@ -300,6 +300,29 @@ export function registerUser(data: {
   return { success: true, message: "Account created successfully!", user: newUser };
 }
 
+export function updateUserRole(
+  userId: string,
+  newRole: "Admin" | "Teacher" | "Student"
+): boolean {
+  const users = getUsers();
+  const idx = users.findIndex((u) => u.id === userId);
+  if (idx === -1) return false;
+  users[idx].role = newRole;
+  saveUsers([...users]);
+  logActivity(`Updated role for ${users[idx].name} to ${newRole}`);
+  return true;
+}
+
+export function deleteUser(userId: string): boolean {
+  const users = getUsers();
+  const target = users.find((u) => u.id === userId);
+  if (!target) return false;
+  const filtered = users.filter((u) => u.id !== userId);
+  saveUsers(filtered);
+  logActivity(`Deleted user ${target.name} (${target.email})`);
+  return true;
+}
+
 export function loginUser(
   email: string,
   pass: string
@@ -307,30 +330,37 @@ export function loginUser(
   const users = getUsers();
   const normalizedEmail = email.trim().toLowerCase();
 
-  // Allow default admin credentials for instant testing
-  if (normalizedEmail === "admin@sms.com" && pass === "admin123") {
-    let adminUser = users.find((u) => u.email.toLowerCase() === "admin@sms.com");
-    if (!adminUser) {
-      adminUser = {
-        id: "USR-000001",
-        name: "System Admin",
-        email: "admin@sms.com",
-        password: "admin123",
-        role: "Admin",
+  // Preset demo accounts for rapid testing
+  const DEMO_ACCOUNTS: Record<string, { pass: string; name: string; role: "Admin" | "Teacher" | "Student" }> = {
+    "admin@sms.com": { pass: "admin123", name: "System Admin", role: "Admin" },
+    "teacher@sms.com": { pass: "teacher123", name: "Sir Ahmed Khan", role: "Teacher" },
+    "student@sms.com": { pass: "student123", name: "Ali Raza", role: "Student" },
+  };
+
+  if (DEMO_ACCOUNTS[normalizedEmail] && pass === DEMO_ACCOUNTS[normalizedEmail].pass) {
+    const demo = DEMO_ACCOUNTS[normalizedEmail];
+    let demoUser = users.find((u) => u.email.toLowerCase() === normalizedEmail);
+    if (!demoUser) {
+      demoUser = {
+        id: `USR-${demo.role.toUpperCase()}-001`,
+        name: demo.name,
+        email: normalizedEmail,
+        password: demo.pass,
+        role: demo.role,
         createdAt: new Date().toISOString(),
       };
-      saveUsers([...users, adminUser]);
+      saveUsers([...users, demoUser]);
     }
     const sessionUser: User = {
-      id: adminUser.id,
-      name: adminUser.name,
-      email: adminUser.email,
-      role: adminUser.role,
-      createdAt: adminUser.createdAt,
+      id: demoUser.id,
+      name: demoUser.name,
+      email: demoUser.email,
+      role: demoUser.role,
+      createdAt: demoUser.createdAt,
     };
     setCurrentUser(sessionUser);
-    logActivity("Admin logged in", "System Admin");
-    return { success: true, message: "Welcome, System Admin!", user: sessionUser };
+    logActivity(`${demo.role} logged in: ${demo.name}`, demo.name);
+    return { success: true, message: `Welcome, ${demo.name} (${demo.role})!`, user: sessionUser };
   }
 
   const found = users.find(

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
@@ -10,9 +10,18 @@ import {
   ClassItem,
   STORAGE_KEYS,
   useStore,
-  getNextStudentId,
+  saveStudents,
   logActivity,
+  User,
 } from "../lib/storage";
+import {
+  getSupabaseStudents,
+  insertSupabaseStudent,
+  updateSupabaseStudent,
+  deleteSupabaseStudent,
+  getSupabaseClasses,
+  insertSupabaseActivity,
+} from "../lib/supabaseService";
 import {
   showWarning,
   showError,
@@ -39,10 +48,34 @@ const DEFAULT_CLASSES = [
 
 export default function StudentManagement() {
   const router = useRouter();
-  const [students, setStudents] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
-  const [classesList] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
+  const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  const [localStudents, setLocalStudents] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [localClasses] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
+  const [students, setStudents] = useState<Student[]>(localStudents);
+  const [classesList, setClassesList] = useState<ClassItem[]>(localClasses);
   const [searchTerm, setSearchTerm] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const [remoteSt, remoteCl] = await Promise.all([
+        getSupabaseStudents(),
+        getSupabaseClasses(),
+      ]);
+      if (!isMounted) return;
+      if (remoteSt.length > 0) {
+        setStudents(remoteSt);
+        setLocalStudents(remoteSt);
+      }
+      if (remoteCl.length > 0) {
+        setClassesList(remoteCl);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [setLocalStudents]);
 
   const [formData, setFormData] = useState<Student>({
     id: "",
@@ -75,7 +108,13 @@ export default function StudentManagement() {
   };
 
   const handleNew = () => {
-    const nextId = getNextStudentId();
+    const maxNum = students.reduce((max, s) => {
+      const match = s.id.match(/\d+/);
+      const num = match ? parseInt(match[0], 10) : 0;
+      return num > max ? num : max;
+    }, 0);
+    const nextId = `STU-${String(maxNum + 1).padStart(4, "0")}`;
+
     setFormData({
       id: nextId,
       name: "",
@@ -89,12 +128,17 @@ export default function StudentManagement() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!formData.name.trim()) {
       showWarning("Required Field", "Student Name is required!");
       return;
     }
-    const studentId = formData.id.trim() || getNextStudentId();
+    const maxNum = students.reduce((max, s) => {
+      const match = s.id.match(/\d+/);
+      const num = match ? parseInt(match[0], 10) : 0;
+      return num > max ? num : max;
+    }, 0);
+    const studentId = formData.id.trim() || `STU-${String(maxNum + 1).padStart(4, "0")}`;
 
     if (students.some((s) => s.id.toLowerCase() === studentId.toLowerCase())) {
       showError(
@@ -105,14 +149,31 @@ export default function StudentManagement() {
     }
 
     const newStudent: Student = { ...formData, id: studentId };
-    const updated = [...students, newStudent];
-    setStudents(updated);
-    logActivity(`Registered new student ${newStudent.name} (${newStudent.id})`);
-    showSuccess("Saved Successfully!", `Student ${newStudent.name} has been added.`);
+
+    // 1. Try Supabase direct write
+    const savedInSupabase = await insertSupabaseStudent(newStudent);
+    if (savedInSupabase) {
+      await insertSupabaseActivity(`Registered new student ${newStudent.name} (${newStudent.id})`);
+      const refreshed = await getSupabaseStudents();
+      setStudents(refreshed);
+      setLocalStudents(refreshed);
+      showSuccess("Saved to Supabase!", `Student ${newStudent.name} saved directly to Supabase.`);
+    } else {
+      // 2. Backup to local if tables not run yet
+      const updated = [...students, newStudent];
+      setStudents(updated);
+      setLocalStudents(updated);
+      saveStudents(updated);
+      logActivity(`Registered new student ${newStudent.name} (${newStudent.id})`);
+      showWarning(
+        "Saved (Supabase Pending)",
+        `Student ${newStudent.name} saved! Run the SQL schema in Supabase SQL editor to enable cloud syncing.`
+      );
+    }
     handleClear();
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     if (!formData.id) {
       showWarning("No Student Selected", "Select a student from the list to update first.");
       return;
@@ -122,20 +183,27 @@ export default function StudentManagement() {
       return;
     }
 
-    const exists = students.some((s) => s.id === formData.id);
-    if (!exists) {
-      showError("Not Found", "Selected student not found in database.");
-      return;
-    }
-
+    const updatedInSupabase = await updateSupabaseStudent(formData);
     const updated = students.map((s) => (s.id === formData.id ? formData : s));
     setStudents(updated);
-    logActivity(`Updated student ${formData.name} (${formData.id})`);
-    showSuccess("Updated!", `Student ${formData.name} record updated.`);
+    setLocalStudents(updated);
+    saveStudents(updated);
+
+    if (updatedInSupabase) {
+      await insertSupabaseActivity(`Updated student ${formData.name} (${formData.id})`);
+      showSuccess("Updated in Supabase!", `Student ${formData.name} record updated.`);
+    } else {
+      logActivity(`Updated student ${formData.name} (${formData.id})`);
+      showSuccess("Updated!", `Student ${formData.name} record updated.`);
+    }
     handleClear();
   };
 
   const handleDelete = async () => {
+    if (currentUser?.role !== "Admin") {
+      showWarning("Admin Access Required", "Only Administrators have permission to delete student records.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a student to delete.");
       return;
@@ -148,8 +216,12 @@ export default function StudentManagement() {
     });
 
     if (confirmed) {
+      await deleteSupabaseStudent(formData.id);
+      await insertSupabaseActivity(`Deleted student ${formData.name} (${formData.id})`);
       const updated = students.filter((s) => s.id !== formData.id);
       setStudents(updated);
+      setLocalStudents(updated);
+      saveStudents(updated);
       logActivity(`Deleted student ${formData.name} (${formData.id})`);
       toastSuccess(`Student "${formData.name}" deleted.`);
       handleClear();
@@ -188,7 +260,7 @@ export default function StudentManagement() {
   );
 
   return (
-    <AuthGuard>
+    <AuthGuard allowedRoles={["Admin", "Teacher"]}>
       <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 

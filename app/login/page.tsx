@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { GraduationCap, Lock, Mail, User as UserIcon, Eye, EyeOff, ShieldCheck, ArrowRight } from "lucide-react";
 import { getCurrentUser, loginUser, registerUser } from "../lib/storage";
+import { insertSupabaseProfile } from "../lib/supabaseService";
 import { showSuccess, showError, showWarning } from "../lib/alert";
 
 export default function LoginPage() {
@@ -20,7 +21,6 @@ export default function LoginPage() {
   const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirm, setSignupConfirm] = useState("");
-  const [signupRole, setSignupRole] = useState<"Admin" | "Teacher" | "Staff">("Admin");
 
   // If already logged in, redirect to dashboard
   useEffect(() => {
@@ -69,10 +69,13 @@ export default function LoginPage() {
       name: signupName,
       email: signupEmail,
       password: signupPassword,
-      role: signupRole,
     });
 
-    if (result.success) {
+    if (result.success && result.user) {
+      // Async sync to Supabase profiles
+      insertSupabaseProfile(result.user).catch((err) =>
+        console.error("Supabase profile sync error:", err)
+      );
       showSuccess("Account Created!", "Your account has been created. Redirecting to dashboard...");
       setTimeout(() => {
         router.push("/dashboard");
@@ -82,9 +85,17 @@ export default function LoginPage() {
     }
   };
 
-  const fillDemoAdmin = () => {
-    setLoginEmail("admin@sms.com");
-    setLoginPassword("admin123");
+  const fillDemo = (role: "Admin" | "Teacher" | "Student") => {
+    if (role === "Admin") {
+      setLoginEmail("admin@sms.com");
+      setLoginPassword("admin123");
+    } else if (role === "Teacher") {
+      setLoginEmail("teacher@sms.com");
+      setLoginPassword("teacher123");
+    } else {
+      setLoginEmail("student@sms.com");
+      setLoginPassword("student123");
+    }
   };
 
   return (
@@ -143,7 +154,7 @@ export default function LoginPage() {
           <p className="text-xs text-slate-500 mt-0.5">
             {mode === "login"
               ? "Access school records, student database, and reports"
-              : "Create an administrator, teacher, or staff account"}
+              : "Create an administrator, teacher, or student account"}
           </p>
         </div>
 
@@ -200,22 +211,40 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              {/* Demo Admin Helper */}
-              <div className="mt-4 p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-blue-900">
-                  <ShieldCheck size={18} className="text-blue-600 shrink-0" />
-                  <div className="text-[11px] leading-tight">
-                    <span className="font-semibold block">Quick Testing</span>
-                    <span className="text-blue-600">admin@sms.com / admin123</span>
-                  </div>
+              {/* Quick 1-Click Demo Logins */}
+              <div className="mt-4 p-3 bg-slate-50 border border-slate-200/80 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5">
+                    <ShieldCheck size={14} className="text-blue-600" /> Quick Testing Logins:
+                  </span>
+                  <span className="text-[10px] text-slate-400">1-click fill</span>
                 </div>
-                <button
-                  type="button"
-                  onClick={fillDemoAdmin}
-                  className="px-2.5 py-1 text-[11px] font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shrink-0"
-                >
-                  Auto Fill
-                </button>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fillDemo("Admin")}
+                    className="px-2 py-1.5 text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <span>👑</span>
+                    <span>Admin</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fillDemo("Teacher")}
+                    className="px-2 py-1.5 text-[11px] font-medium bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <span>👨‍🏫</span>
+                    <span>Teacher</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fillDemo("Student")}
+                    className="px-2 py-1.5 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors flex items-center justify-center gap-1"
+                  >
+                    <span>🎓</span>
+                    <span>Student</span>
+                  </button>
+                </div>
               </div>
             </form>
           ) : (
@@ -252,19 +281,9 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Portal Role
-                </label>
-                <select
-                  value={signupRole}
-                  onChange={(e) => setSignupRole(e.target.value as "Admin" | "Teacher" | "Staff")}
-                  className="w-full px-3.5 py-2 border border-slate-300 rounded-xl text-xs text-slate-800 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 transition-all bg-white cursor-pointer"
-                >
-                  <option value="Admin">Admin (Full Control)</option>
-                  <option value="Teacher">Teacher</option>
-                  <option value="Staff">Staff / Operator</option>
-                </select>
+              <div className="p-2.5 bg-blue-50/70 border border-blue-200/50 rounded-xl text-[11px] text-blue-800 leading-relaxed">
+                <span className="font-semibold block">ℹ️ Default Role: Student</span>
+                <span>All newly registered accounts start with Student access. School Admin can grant Teacher or Admin privileges from the Users panel.</span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

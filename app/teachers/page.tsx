@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
@@ -10,9 +10,18 @@ import {
   Teacher,
   STORAGE_KEYS,
   useStore,
+  saveTeachers,
   getNextTeacherId,
   logActivity,
+  User,
 } from "../lib/storage";
+import {
+  getSupabaseTeachers,
+  insertSupabaseTeacher,
+  updateSupabaseTeacher,
+  deleteSupabaseTeacher,
+  insertSupabaseActivity,
+} from "../lib/supabaseService";
 import {
   showWarning,
   showError,
@@ -36,9 +45,26 @@ const SUBJECT_OPTIONS = [
 
 export default function TeacherManagement() {
   const router = useRouter();
-  const [teachers, setTeachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
+  const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  const [localTeachers, setLocalTeachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
+  const [teachers, setTeachers] = useState<Teacher[]>(localTeachers);
   const [searchTerm, setSearchTerm] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const remote = await getSupabaseTeachers();
+      if (!isMounted) return;
+      if (remote.length > 0) {
+        setTeachers(remote);
+        setLocalTeachers(remote);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [setLocalTeachers]);
 
   const [formData, setFormData] = useState<Teacher>({
     id: "",
@@ -79,7 +105,11 @@ export default function TeacherManagement() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (currentUser?.role !== "Admin") {
+      showWarning("Admin Access Required", "Only Administrators have permission to add new teacher records.");
+      return;
+    }
     if (!formData.name.trim()) {
       showWarning("Required Field", "Please enter Teacher Name.");
       return;
@@ -95,14 +125,33 @@ export default function TeacherManagement() {
     }
 
     const newTeacher: Teacher = { ...formData, id: teacherId };
-    const updated = [...teachers, newTeacher];
-    setTeachers(updated);
-    logActivity(`Added teacher ${newTeacher.name} (${newTeacher.subject})`);
-    showSuccess("Teacher Added!", `Teacher ${newTeacher.name} has been saved.`);
+    const savedInSupabase = await insertSupabaseTeacher(newTeacher);
+
+    if (savedInSupabase) {
+      await insertSupabaseActivity(`Added teacher ${newTeacher.name} (${newTeacher.subject})`);
+      const refreshed = await getSupabaseTeachers();
+      setTeachers(refreshed);
+      setLocalTeachers(refreshed);
+      showSuccess("Teacher Added in Supabase!", `Teacher ${newTeacher.name} has been saved.`);
+    } else {
+      const updated = [...teachers, newTeacher];
+      setTeachers(updated);
+      setLocalTeachers(updated);
+      saveTeachers(updated);
+      logActivity(`Added teacher ${newTeacher.name} (${newTeacher.subject})`);
+      showWarning(
+        "Saved (Supabase Pending)",
+        `Teacher ${newTeacher.name} saved! Run the SQL schema in Supabase to sync.`
+      );
+    }
     handleClear();
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
+    if (currentUser?.role !== "Admin") {
+      showWarning("Admin Access Required", "Only Administrators have permission to update teacher records.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a teacher from the list to update.");
       return;
@@ -112,20 +161,27 @@ export default function TeacherManagement() {
       return;
     }
 
-    const exists = teachers.some((t) => t.id === formData.id);
-    if (!exists) {
-      showError("Not Found", "Selected teacher not found in database.");
-      return;
-    }
-
+    const updatedInSupabase = await updateSupabaseTeacher(formData);
     const updated = teachers.map((t) => (t.id === formData.id ? formData : t));
     setTeachers(updated);
-    logActivity(`Updated teacher ${formData.name} (${formData.id})`);
-    showSuccess("Teacher Updated!", `Teacher ${formData.name} has been updated.`);
+    setLocalTeachers(updated);
+    saveTeachers(updated);
+
+    if (updatedInSupabase) {
+      await insertSupabaseActivity(`Updated teacher ${formData.name} (${formData.id})`);
+      showSuccess("Teacher Updated in Supabase!", `Teacher ${formData.name} has been updated.`);
+    } else {
+      logActivity(`Updated teacher ${formData.name} (${formData.id})`);
+      showSuccess("Teacher Updated!", `Teacher ${formData.name} has been updated.`);
+    }
     handleClear();
   };
 
   const handleDelete = async () => {
+    if (currentUser?.role !== "Admin") {
+      showWarning("Admin Access Required", "Only Administrators have permission to delete teacher records.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a teacher to delete.");
       return;
@@ -138,9 +194,17 @@ export default function TeacherManagement() {
     });
 
     if (confirmed) {
+      const deletedInSupabase = await deleteSupabaseTeacher(formData.id);
       const updated = teachers.filter((t) => t.id !== formData.id);
       setTeachers(updated);
-      logActivity(`Deleted teacher ${formData.name} (${formData.id})`);
+      setLocalTeachers(updated);
+      saveTeachers(updated);
+
+      if (deletedInSupabase) {
+        await insertSupabaseActivity(`Deleted teacher ${formData.name} (${formData.id})`);
+      } else {
+        logActivity(`Deleted teacher ${formData.name} (${formData.id})`);
+      }
       toastSuccess(`Teacher "${formData.name}" deleted.`);
       handleClear();
     }
@@ -162,6 +226,7 @@ export default function TeacherManagement() {
   };
 
   const formatSalary = (val: string) => {
+    if (currentUser?.role !== "Admin") return "Confidential";
     if (!val) return "0.00";
     const num = parseFloat(val.replace(/,/g, ""));
     if (isNaN(num)) return val;
@@ -177,7 +242,7 @@ export default function TeacherManagement() {
   );
 
   return (
-    <AuthGuard>
+    <AuthGuard allowedRoles={["Admin", "Teacher"]}>
       <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
@@ -243,10 +308,15 @@ export default function TeacherManagement() {
                   <input
                     type="text"
                     name="salary"
-                    value={formData.salary}
+                    disabled={currentUser?.role !== "Admin"}
+                    value={currentUser?.role !== "Admin" ? "Confidential" : formData.salary}
                     onChange={handleInputChange}
                     placeholder="45,000.00"
-                    className="flex-1 px-3 py-1.5 border border-slate-300 rounded text-[13px] text-slate-700 outline-none focus:border-blue-500 bg-white"
+                    className={`flex-1 px-3 py-1.5 border border-slate-300 rounded text-[13px] outline-none ${
+                      currentUser?.role !== "Admin"
+                        ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                        : "bg-white text-slate-700 focus:border-blue-500"
+                    }`}
                   />
                 </div>
 

@@ -4,22 +4,30 @@ import React, { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { STORAGE_KEYS, useStore, User } from "../lib/storage";
 
-export default function AuthGuard({ children }: { children: React.ReactNode }) {
+export default function AuthGuard({
+  children,
+  allowedRoles,
+}: {
+  children: React.ReactNode;
+  allowedRoles?: ("Admin" | "Teacher" | "Student")[];
+}) {
   const router = useRouter();
   const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
 
   useEffect(() => {
     if (!currentUser) {
       router.replace("/login");
+    } else if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
+      router.replace("/dashboard");
     }
-  }, [currentUser, router]);
+  }, [currentUser, allowedRoles, router]);
 
-  if (!currentUser) {
+  if (!currentUser || (allowedRoles && !allowedRoles.includes(currentUser.role))) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-[#F8FAFC]">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs font-medium text-slate-400">Verifying session...</span>
+          <span className="text-xs font-medium text-slate-400">Verifying access permissions...</span>
         </div>
       </div>
     );

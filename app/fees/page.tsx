@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
@@ -11,9 +11,19 @@ import {
   Student,
   STORAGE_KEYS,
   useStore,
+  saveFees,
   getNextFeeId,
   logActivity,
+  User,
 } from "../lib/storage";
+import {
+  getSupabaseFees,
+  insertSupabaseFee,
+  updateSupabaseFee,
+  deleteSupabaseFee,
+  getSupabaseStudents,
+  insertSupabaseActivity,
+} from "../lib/supabaseService";
 import {
   showWarning,
   showError,
@@ -51,9 +61,33 @@ const MONTH_OPTIONS = [
 
 export default function FeeManagement() {
   const router = useRouter();
-  const [fees, setFees] = useStore<FeeRecord[]>(STORAGE_KEYS.FEES, []);
-  const [students] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  const [localFees, setLocalFees] = useStore<FeeRecord[]>(STORAGE_KEYS.FEES, []);
+  const [localStudents] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [fees, setFees] = useState<FeeRecord[]>(localFees);
+  const [students, setStudents] = useState<Student[]>(localStudents);
   const [searchTerm, setSearchTerm] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const [remoteFees, remoteStudents] = await Promise.all([
+        getSupabaseFees(),
+        getSupabaseStudents(),
+      ]);
+      if (!isMounted) return;
+      if (remoteFees.length > 0) {
+        setFees(remoteFees);
+        setLocalFees(remoteFees);
+      }
+      if (remoteStudents.length > 0) {
+        setStudents(remoteStudents);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [setLocalFees]);
 
   const [formData, setFormData] = useState<FeeRecord>({
     id: "",
@@ -95,7 +129,11 @@ export default function FeeManagement() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (currentUser?.role === "Student") {
+      showWarning("Read-Only Mode", "Students can view fee status, but only Administrators can create fee records.");
+      return;
+    }
     if (!formData.studentName.trim()) {
       showWarning("Required Field", "Please select a student first.");
       return;
@@ -112,33 +150,59 @@ export default function FeeManagement() {
 
     const paymentDate = formData.paymentDate || new Date().toISOString().split("T")[0];
     const newRecord: FeeRecord = { ...formData, id: feeId, paymentDate };
-    const updated = [...fees, newRecord];
-    setFees(updated);
-    logActivity(`Recorded fee payment of Rs. ${newRecord.amount} for ${newRecord.studentName}`);
-    showSuccess("Fee Recorded!", `Fee receipt ${newRecord.id} saved for ${newRecord.studentName}.`);
+    const savedInSupabase = await insertSupabaseFee(newRecord);
+
+    if (savedInSupabase) {
+      await insertSupabaseActivity(`Recorded fee payment of Rs. ${newRecord.amount} for ${newRecord.studentName}`);
+      const refreshed = await getSupabaseFees();
+      setFees(refreshed);
+      setLocalFees(refreshed);
+      showSuccess("Fee Recorded in Supabase!", `Fee receipt ${newRecord.id} saved for ${newRecord.studentName}.`);
+    } else {
+      const updated = [...fees, newRecord];
+      setFees(updated);
+      setLocalFees(updated);
+      saveFees(updated);
+      logActivity(`Recorded fee payment of Rs. ${newRecord.amount} for ${newRecord.studentName}`);
+      showWarning(
+        "Saved (Supabase Pending)",
+        `Fee receipt ${newRecord.id} saved! Run the SQL schema in Supabase to sync.`
+      );
+    }
     handleClear();
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
+    if (currentUser?.role === "Student") {
+      showWarning("Read-Only Mode", "Students cannot edit fee records.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a fee record from the list to update.");
       return;
     }
 
-    const exists = fees.some((f) => f.id === formData.id);
-    if (!exists) {
-      showError("Not Found", "Selected fee record not found in database.");
-      return;
-    }
-
+    const updatedInSupabase = await updateSupabaseFee(formData);
     const updated = fees.map((f) => (f.id === formData.id ? formData : f));
     setFees(updated);
-    logActivity(`Updated fee record (${formData.id}) for ${formData.studentName}`);
-    showSuccess("Record Updated!", `Fee record ${formData.id} has been updated.`);
+    setLocalFees(updated);
+    saveFees(updated);
+
+    if (updatedInSupabase) {
+      await insertSupabaseActivity(`Updated fee record (${formData.id}) for ${formData.studentName}`);
+      showSuccess("Record Updated in Supabase!", `Fee record ${formData.id} has been updated.`);
+    } else {
+      logActivity(`Updated fee record (${formData.id}) for ${formData.studentName}`);
+      showSuccess("Record Updated!", `Fee record ${formData.id} has been updated.`);
+    }
     handleClear();
   };
 
   const handleDelete = async () => {
+    if (currentUser?.role === "Student") {
+      showWarning("Read-Only Mode", "Students cannot delete fee records.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a fee record to delete.");
       return;
@@ -151,9 +215,17 @@ export default function FeeManagement() {
     });
 
     if (confirmed) {
+      const deletedInSupabase = await deleteSupabaseFee(formData.id);
       const updated = fees.filter((f) => f.id !== formData.id);
       setFees(updated);
-      logActivity(`Deleted fee record (${formData.id})`);
+      setLocalFees(updated);
+      saveFees(updated);
+
+      if (deletedInSupabase) {
+        await insertSupabaseActivity(`Deleted fee record (${formData.id})`);
+      } else {
+        logActivity(`Deleted fee record (${formData.id})`);
+      }
       toastSuccess(`Fee record "${formData.id}" deleted.`);
       handleClear();
     }
@@ -190,7 +262,23 @@ export default function FeeManagement() {
     return dateStr;
   };
 
-  const filteredFees = fees.filter(
+  const isStudent = currentUser?.role === "Student";
+
+  // For students, filter to their records only
+  const visibleFees = isStudent
+    ? fees.filter((f) => {
+        const studentName = (currentUser?.name || "").toLowerCase().trim();
+        const emailUser = (currentUser?.email || "").split("@")[0].toLowerCase().trim();
+        const feeName = f.studentName.toLowerCase().trim();
+        return (
+          (studentName && feeName.includes(studentName)) ||
+          (studentName && studentName.includes(feeName)) ||
+          (emailUser && feeName.includes(emailUser))
+        );
+      })
+    : fees;
+
+  const filteredFees = visibleFees.filter(
     (f) =>
       f.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       f.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -199,23 +287,70 @@ export default function FeeManagement() {
   );
 
   return (
-    <AuthGuard>
+    <AuthGuard allowedRoles={["Admin", "Student"]}>
       <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
       <main className="flex-1 flex flex-col h-full overflow-auto bg-[#F1F5F9]">
-        <WindowHeader title="Fee Management" onClose={() => router.push("/dashboard")} />
+        <WindowHeader
+          title={isStudent ? "My Fee Records" : "Fee Management"}
+          onClose={() => router.push("/dashboard")}
+        />
 
         <div className="p-6 max-w-5xl mx-auto w-full">
-          {/* FORM CARD */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-            <h2 className="text-[13px] font-bold text-slate-700 mb-6 tracking-wide">
-              Fee Information
-            </h2>
+          {/* STUDENT HERO PORTAL BANNER (If Student) */}
+          {isStudent ? (
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-6 mb-6 text-white shadow-md">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <span className="text-[11px] font-semibold text-blue-200 uppercase tracking-wider block">
+                    Student Fee Portal
+                  </span>
+                  <h2 className="text-xl font-bold">{currentUser?.name}</h2>
+                  <span className="text-xs text-blue-100">{currentUser?.email}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs text-blue-200 block">Access Mode</span>
+                  <span className="text-[11px] px-2.5 py-0.5 bg-white/20 rounded-full font-semibold border border-white/30 inline-block mt-0.5">
+                    Personal Records Only
+                  </span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4 pt-4 border-t border-blue-500/40">
+                <div>
+                  <span className="text-[11px] text-blue-200 block">Total Invoices</span>
+                  <span className="text-lg font-bold">{visibleFees.length}</span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-blue-200 block">Paid Amount</span>
+                  <span className="text-lg font-bold text-emerald-300">
+                    Rs. {visibleFees
+                      .filter((f) => f.status === "Paid")
+                      .reduce((sum, f) => sum + (parseFloat(f.amount.replace(/,/g, "")) || 0), 0)
+                      .toLocaleString()}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-blue-200 block">Pending Balance</span>
+                  <span className="text-lg font-bold text-amber-300">
+                    Rs. {visibleFees
+                      .filter((f) => f.status === "Pending")
+                      .reduce((sum, f) => sum + (parseFloat(f.amount.replace(/,/g, "")) || 0), 0)
+                      .toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ADMIN FULL FEE FORM CARD */
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+              <h2 className="text-[13px] font-bold text-slate-700 mb-6 tracking-wide">
+                Fee Information
+              </h2>
 
-            <div className="flex items-start justify-between gap-8">
-              {/* Form Grid */}
-              <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-4">
+              <div className="flex items-start justify-between gap-8">
+                {/* Form Grid */}
+                <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-4">
                 {/* Student Dropdown */}
                 <div className="flex items-center gap-3">
                   <label className="text-[13px] text-slate-600 w-24 shrink-0">
@@ -362,12 +497,13 @@ export default function FeeManagement() {
               </button>
             </div>
           </div>
+          )}
 
           {/* LIST CARD */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[13px] font-bold text-slate-700 tracking-wide">
-                Fee Records
+                {isStudent ? `My Fee Invoices (${filteredFees.length})` : "Fee Records"}
               </h2>
               <input
                 type="text"
@@ -394,12 +530,14 @@ export default function FeeManagement() {
                   {filteredFees.map((item) => (
                     <tr
                       key={item.id}
-                      onClick={() => handleRowClick(item)}
-                      className={`hover:bg-blue-50 cursor-pointer transition-colors ${
-                        formData.id === item.id ? "bg-blue-50 font-medium" : "bg-white"
-                      }`}
+                      onClick={() => !isStudent && handleRowClick(item)}
+                      className={`transition-colors ${
+                        isStudent
+                          ? "hover:bg-slate-50 cursor-default"
+                          : "hover:bg-blue-50 cursor-pointer"
+                      } ${formData.id === item.id ? "bg-blue-50 font-medium" : "bg-white"}`}
                     >
-                      <td className="py-2.5 px-4">{item.id}</td>
+                      <td className="py-2.5 px-4 font-mono text-xs">{item.id}</td>
                       <td className="py-2.5 px-4 font-medium text-slate-700">
                         {item.studentName}
                       </td>
@@ -424,7 +562,9 @@ export default function FeeManagement() {
                   {filteredFees.length === 0 && (
                     <tr>
                       <td colSpan={6} className="text-center py-8 text-slate-400">
-                        {fees.length === 0
+                        {isStudent
+                          ? `No fee invoices found under name "${currentUser?.name}". Please contact school administration.`
+                          : fees.length === 0
                           ? "No fee records found. Click 'New' above to record student fee."
                           : "No records match your search."}
                       </td>

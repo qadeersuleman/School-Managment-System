@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
 import AuthGuard from "../components/AuthGuard";
@@ -10,12 +10,34 @@ import {
   STORAGE_KEYS,
   useStore,
 } from "../lib/storage";
+import {
+  getSupabaseStudents,
+  getSupabaseFees,
+} from "../lib/supabaseService";
 import { Printer } from "lucide-react";
 
 export default function ReportsPage() {
-  const [students] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
-  const [fees] = useStore<FeeRecord[]>(STORAGE_KEYS.FEES, []);
+  const [localStudents] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [localFees] = useStore<FeeRecord[]>(STORAGE_KEYS.FEES, []);
+  const [students, setStudents] = useState<Student[]>(localStudents);
+  const [fees, setFees] = useState<FeeRecord[]>(localFees);
   const [activeTab, setActiveTab] = useState<"students" | "fees">("students");
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const [rStudents, rFees] = await Promise.all([
+        getSupabaseStudents(),
+        getSupabaseFees(),
+      ]);
+      if (!isMounted) return;
+      if (rStudents.length > 0) setStudents(rStudents);
+      if (rFees.length > 0) setFees(rFees);
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const totalFeeCollected = fees
     .filter((f) => f.status === "Paid")
@@ -32,7 +54,7 @@ export default function ReportsPage() {
     }, 0);
 
   return (
-    <AuthGuard>
+    <AuthGuard allowedRoles={["Admin", "Teacher"]}>
       <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 

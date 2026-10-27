@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import Sidebar from "../components/Sidebar";
 import AuthGuard from "../components/AuthGuard";
@@ -12,6 +12,7 @@ import {
   FileText,
   GraduationCap,
   PlusCircle,
+  ShieldAlert,
 } from "lucide-react";
 import {
   Student,
@@ -24,15 +25,54 @@ import {
   useStore,
   User as UserType,
 } from "../lib/storage";
+import {
+  getSupabaseStudents,
+  getSupabaseTeachers,
+  getSupabaseClasses,
+  getSupabaseFees,
+  getSupabaseAttendance,
+  getSupabaseActivities,
+} from "../lib/supabaseService";
 
 export default function Dashboard() {
   const [currentUser] = useStore<UserType | null>(STORAGE_KEYS.CURRENT_USER, null);
-  const [students] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
-  const [teachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
-  const [classes] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
-  const [fees] = useStore<FeeRecord[]>(STORAGE_KEYS.FEES, []);
-  const [attendance] = useStore<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, []);
-  const [activities] = useStore<Activity[]>(STORAGE_KEYS.ACTIVITIES, []);
+  const [localStudents] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [localTeachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
+  const [localClasses] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
+  const [localFees] = useStore<FeeRecord[]>(STORAGE_KEYS.FEES, []);
+  const [localAttendance] = useStore<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, []);
+  const [localActivities] = useStore<Activity[]>(STORAGE_KEYS.ACTIVITIES, []);
+
+  const [students, setStudents] = useState<Student[]>(localStudents);
+  const [teachers, setTeachers] = useState<Teacher[]>(localTeachers);
+  const [classes, setClasses] = useState<ClassItem[]>(localClasses);
+  const [fees, setFees] = useState<FeeRecord[]>(localFees);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(localAttendance);
+  const [activities, setActivities] = useState<Activity[]>(localActivities);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const [rStudents, rTeachers, rClasses, rFees, rAtt, rAct] = await Promise.all([
+        getSupabaseStudents(),
+        getSupabaseTeachers(),
+        getSupabaseClasses(),
+        getSupabaseFees(),
+        getSupabaseAttendance(),
+        getSupabaseActivities(),
+      ]);
+      if (!isMounted) return;
+      if (rStudents.length > 0) setStudents(rStudents);
+      if (rTeachers.length > 0) setTeachers(rTeachers);
+      if (rClasses.length > 0) setClasses(rClasses);
+      if (rFees.length > 0) setFees(rFees);
+      if (rAtt.length > 0) setAttendance(rAtt);
+      if (rAct.length > 0) setActivities(rAct);
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Compute pending fees
   const pendingTotal = fees
@@ -81,7 +121,11 @@ export default function Dashboard() {
                   {currentUser?.name || "Admin"}
                 </span>
                 <span className="text-[10px] text-slate-400">
-                  {currentUser?.role || "School Admin"}
+                  {currentUser?.role === "Admin"
+                    ? "Administrator"
+                    : currentUser?.role === "Teacher"
+                    ? "Teacher"
+                    : "Student"}
                 </span>
               </div>
               <ChevronDown size={14} className="text-slate-400" />
@@ -126,42 +170,104 @@ export default function Dashboard() {
           {/* QUICK LINKS BANNER */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-4 text-white shadow-sm mb-6 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="text-sm font-bold">Quick Actions</h2>
+              <h2 className="text-sm font-bold">
+                {currentUser?.role === "Student"
+                  ? "Student Quick Access"
+                  : currentUser?.role === "Teacher"
+                  ? "Teacher Portal Actions"
+                  : "Quick Actions"}
+              </h2>
               <p className="text-xs text-blue-100">
-                All records currently start at 0. Start adding your school records below:
+                {currentUser?.role === "Student"
+                  ? "View your enrolled classes, payment history, and attendance records."
+                  : currentUser?.role === "Teacher"
+                  ? "Manage classroom activities, mark daily attendance, and track students."
+                  : "Manage school records, enroll students, assign teachers, and track fees."}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Link
-                href="/students"
-                className="px-3 py-1.5 bg-white text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-50 transition-colors shadow-sm flex items-center gap-1.5"
-              >
-                <PlusCircle size={14} /> Add Student
-              </Link>
-              <Link
-                href="/classes"
-                className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
-              >
-                <PlusCircle size={14} /> Add Class
-              </Link>
-              <Link
-                href="/teachers"
-                className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
-              >
-                <PlusCircle size={14} /> Add Teacher
-              </Link>
-              <Link
-                href="/fees"
-                className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
-              >
-                <PlusCircle size={14} /> Add Fee
-              </Link>
-              <Link
-                href="/attendance"
-                className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
-              >
-                <PlusCircle size={14} /> Mark Attendance
-              </Link>
+              {currentUser?.role === "Student" ? (
+                <>
+                  <Link
+                    href="/classes"
+                    className="px-3 py-1.5 bg-white text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-50 transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    View Classes
+                  </Link>
+                  <Link
+                    href="/fees"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    View Fees
+                  </Link>
+                  <Link
+                    href="/attendance"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    View Attendance
+                  </Link>
+                </>
+              ) : currentUser?.role === "Teacher" ? (
+                <>
+                  <Link
+                    href="/students"
+                    className="px-3 py-1.5 bg-white text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-50 transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Student
+                  </Link>
+                  <Link
+                    href="/classes"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Class
+                  </Link>
+                  <Link
+                    href="/attendance"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Mark Attendance
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/students"
+                    className="px-3 py-1.5 bg-white text-blue-700 rounded-lg text-xs font-medium hover:bg-blue-50 transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Student
+                  </Link>
+                  <Link
+                    href="/classes"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Class
+                  </Link>
+                  <Link
+                    href="/teachers"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Teacher
+                  </Link>
+                  <Link
+                    href="/fees"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Add Fee
+                  </Link>
+                  <Link
+                    href="/attendance"
+                    className="px-3 py-1.5 bg-blue-500/50 hover:bg-blue-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <PlusCircle size={14} /> Mark Attendance
+                  </Link>
+                  <Link
+                    href="/users"
+                    className="px-3 py-1.5 bg-purple-500/50 hover:bg-purple-500/80 text-white rounded-lg text-xs font-medium transition-colors shadow-sm flex items-center gap-1.5"
+                  >
+                    <ShieldAlert size={14} /> Manage Users
+                  </Link>
+                </>
+              )}
             </div>
           </div>
 

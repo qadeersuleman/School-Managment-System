@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
@@ -11,9 +11,19 @@ import {
   Student,
   STORAGE_KEYS,
   useStore,
+  saveAttendance,
   getNextAttendanceId,
   logActivity,
+  User,
 } from "../lib/storage";
+import {
+  getSupabaseAttendance,
+  insertSupabaseAttendance,
+  updateSupabaseAttendance,
+  deleteSupabaseAttendance,
+  getSupabaseStudents,
+  insertSupabaseActivity,
+} from "../lib/supabaseService";
 import {
   showWarning,
   showSuccess,
@@ -23,10 +33,34 @@ import {
 
 export default function AttendanceManagement() {
   const router = useRouter();
-  const [records, setRecords] = useStore<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, []);
-  const [students] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  const [localRecords, setLocalRecords] = useStore<AttendanceRecord[]>(STORAGE_KEYS.ATTENDANCE, []);
+  const [localStudents] = useStore<Student[]>(STORAGE_KEYS.STUDENTS, []);
+  const [records, setRecords] = useState<AttendanceRecord[]>(localRecords);
+  const [students, setStudents] = useState<Student[]>(localStudents);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const [remoteAtt, remoteStudents] = await Promise.all([
+        getSupabaseAttendance(),
+        getSupabaseStudents(),
+      ]);
+      if (!isMounted) return;
+      if (remoteAtt.length > 0) {
+        setRecords(remoteAtt);
+        setLocalRecords(remoteAtt);
+      }
+      if (remoteStudents.length > 0) {
+        setStudents(remoteStudents);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [setLocalRecords]);
 
   const [formData, setFormData] = useState<{
     studentId: string;
@@ -58,7 +92,11 @@ export default function AttendanceManagement() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (currentUser?.role === "Student") {
+      showWarning("Read-Only Mode", "Students can view attendance records, but only Teachers and Admins can record attendance.");
+      return;
+    }
     if (!formData.studentName.trim()) {
       showWarning("Required Field", "Please select a student from the dropdown.");
       return;
@@ -68,21 +106,28 @@ export default function AttendanceManagement() {
 
     if (selectedId) {
       // Update existing record
-      const updated = records.map((r) =>
-        r.id === selectedId
-          ? {
-              ...r,
-              studentId: formData.studentId,
-              studentName: formData.studentName,
-              date: recordDate,
-              status: formData.status,
-              remarks: formData.remarks,
-            }
-          : r
-      );
+      const updatedRec: AttendanceRecord = {
+        id: selectedId,
+        studentId: formData.studentId,
+        studentName: formData.studentName,
+        date: recordDate,
+        status: formData.status,
+        remarks: formData.remarks,
+      };
+
+      const updatedInSupabase = await updateSupabaseAttendance(updatedRec);
+      const updated = records.map((r) => (r.id === selectedId ? updatedRec : r));
       setRecords(updated);
-      logActivity(`Updated attendance for ${formData.studentName}: ${formData.status}`);
-      showSuccess("Attendance Updated!", `Attendance updated for ${formData.studentName}.`);
+      setLocalRecords(updated);
+      saveAttendance(updated);
+
+      if (updatedInSupabase) {
+        await insertSupabaseActivity(`Updated attendance for ${formData.studentName}: ${formData.status}`);
+        showSuccess("Attendance Updated in Supabase!", `Attendance updated for ${formData.studentName}.`);
+      } else {
+        logActivity(`Updated attendance for ${formData.studentName}: ${formData.status}`);
+        showSuccess("Attendance Updated!", `Attendance updated for ${formData.studentName}.`);
+      }
       handleClear();
       return;
     }
@@ -98,14 +143,29 @@ export default function AttendanceManagement() {
       remarks: formData.remarks,
     };
 
-    const updated = [...records, newRecord];
-    setRecords(updated);
-    logActivity(`Marked attendance for ${newRecord.studentName} as ${newRecord.status}`);
-    showSuccess("Attendance Saved!", `Marked ${newRecord.studentName} as ${newRecord.status}.`);
+    const savedInSupabase = await insertSupabaseAttendance(newRecord);
+    if (savedInSupabase) {
+      await insertSupabaseActivity(`Marked attendance for ${newRecord.studentName} as ${newRecord.status}`);
+      const refreshed = await getSupabaseAttendance();
+      setRecords(refreshed);
+      setLocalRecords(refreshed);
+      showSuccess("Attendance Saved in Supabase!", `Marked ${newRecord.studentName} as ${newRecord.status}.`);
+    } else {
+      const updated = [...records, newRecord];
+      setRecords(updated);
+      setLocalRecords(updated);
+      saveAttendance(updated);
+      logActivity(`Marked attendance for ${newRecord.studentName} as ${newRecord.status}`);
+      showSuccess("Attendance Saved!", `Marked ${newRecord.studentName} as ${newRecord.status}.`);
+    }
     handleClear();
   };
 
   const handleDelete = async () => {
+    if (currentUser?.role !== "Admin") {
+      showWarning("Admin Access Required", "Only Administrators are allowed to delete attendance records.");
+      return;
+    }
     if (!selectedId) return;
     const confirmed = await confirmDialog({
       title: "Delete Attendance Record?",
@@ -115,9 +175,17 @@ export default function AttendanceManagement() {
     });
 
     if (confirmed) {
+      const deletedInSupabase = await deleteSupabaseAttendance(selectedId);
       const updated = records.filter((r) => r.id !== selectedId);
       setRecords(updated);
-      logActivity(`Deleted attendance record #${selectedId}`);
+      setLocalRecords(updated);
+      saveAttendance(updated);
+
+      if (deletedInSupabase) {
+        await insertSupabaseActivity(`Deleted attendance record #${selectedId}`);
+      } else {
+        logActivity(`Deleted attendance record #${selectedId}`);
+      }
       toastSuccess("Attendance record deleted.");
       handleClear();
     }
@@ -154,7 +222,22 @@ export default function AttendanceManagement() {
     return dateStr;
   };
 
-  const filteredRecords = records.filter(
+  const isStudent = currentUser?.role === "Student";
+
+  const visibleRecords = isStudent
+    ? records.filter((r) => {
+        const studentName = (currentUser?.name || "").toLowerCase().trim();
+        const emailUser = (currentUser?.email || "").split("@")[0].toLowerCase().trim();
+        const recName = r.studentName.toLowerCase().trim();
+        return (
+          (studentName && recName.includes(studentName)) ||
+          (studentName && studentName.includes(recName)) ||
+          (emailUser && recName.includes(emailUser))
+        );
+      })
+    : records;
+
+  const filteredRecords = visibleRecords.filter(
     (r) =>
       r.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       r.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -162,24 +245,69 @@ export default function AttendanceManagement() {
       r.status.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const studentTotal = visibleRecords.length;
+  const studentPresent = visibleRecords.filter((r) => r.status === "Present").length;
+  const studentAbsent = visibleRecords.filter((r) => r.status === "Absent").length;
+  const studentLeave = visibleRecords.filter((r) => r.status === "Leave").length;
+  const presentPct = studentTotal > 0 ? Math.round((studentPresent / studentTotal) * 100) : 0;
+
   return (
     <AuthGuard>
       <div className="flex h-screen bg-[#F8FAFC] font-sans text-slate-800 overflow-hidden">
       <Sidebar />
 
       <main className="flex-1 flex flex-col h-full overflow-auto bg-[#F1F5F9]">
-        <WindowHeader title="Attendance Management" onClose={() => router.push("/dashboard")} />
+        <WindowHeader
+          title={isStudent ? "My Attendance Log" : "Attendance Management"}
+          onClose={() => router.push("/dashboard")}
+        />
 
         <div className="p-6 max-w-5xl mx-auto w-full">
-          {/* FORM CARD */}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-            <h2 className="text-[13px] font-bold text-slate-700 mb-6 tracking-wide">
-              Attendance Information
-            </h2>
+          {/* STUDENT ATTENDANCE BANNER (If Student) */}
+          {isStudent ? (
+            <div className="bg-gradient-to-r from-teal-600 to-emerald-700 rounded-xl p-6 mb-6 text-white shadow-md">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <span className="text-[11px] font-semibold text-teal-200 uppercase tracking-wider block">
+                    Student Attendance Portal
+                  </span>
+                  <h2 className="text-xl font-bold">{currentUser?.name}</h2>
+                  <span className="text-xs text-teal-100">{currentUser?.email}</span>
+                </div>
+                <div className="text-right">
+                  <span className="text-xs text-teal-200 block">Overall Attendance</span>
+                  <span className="text-2xl font-bold">{presentPct}%</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-3 pt-4 border-t border-teal-500/40 text-center">
+                <div className="bg-white/10 rounded-lg p-2">
+                  <span className="text-[10px] text-teal-200 block">Total Days</span>
+                  <span className="text-base font-bold">{studentTotal}</span>
+                </div>
+                <div className="bg-white/10 rounded-lg p-2">
+                  <span className="text-[10px] text-emerald-200 block">Present</span>
+                  <span className="text-base font-bold text-emerald-300">{studentPresent}</span>
+                </div>
+                <div className="bg-white/10 rounded-lg p-2">
+                  <span className="text-[10px] text-red-200 block">Absent</span>
+                  <span className="text-base font-bold text-red-200">{studentAbsent}</span>
+                </div>
+                <div className="bg-white/10 rounded-lg p-2">
+                  <span className="text-[10px] text-amber-200 block">Leave</span>
+                  <span className="text-base font-bold text-amber-200">{studentLeave}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ADMIN / TEACHER ATTENDANCE FORM CARD */
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+              <h2 className="text-[13px] font-bold text-slate-700 mb-6 tracking-wide">
+                Attendance Information
+              </h2>
 
-            <div className="flex items-start justify-between gap-8">
-              {/* Form Fields */}
-              <div className="flex-1 max-w-md space-y-4">
+              <div className="flex items-start justify-between gap-8">
+                {/* Form Fields */}
+                <div className="flex-1 max-w-md space-y-4">
                 {/* Student Dropdown */}
                 <div className="flex items-center gap-4">
                   <label className="text-[13px] text-slate-600 w-32 shrink-0">
@@ -298,12 +426,15 @@ export default function AttendanceManagement() {
               </button>
             </div>
           </div>
+          )}
 
           {/* LIST CARD */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-[13px] font-bold text-slate-700 tracking-wide">
-                Attendance Records
+                {isStudent
+                  ? `My Attendance Records (${filteredRecords.length})`
+                  : "Attendance Records"}
               </h2>
               <input
                 type="text"
@@ -329,12 +460,14 @@ export default function AttendanceManagement() {
                   {filteredRecords.map((item) => (
                     <tr
                       key={item.id}
-                      onClick={() => handleRowClick(item)}
-                      className={`hover:bg-blue-50 cursor-pointer transition-colors ${
-                        selectedId === item.id ? "bg-blue-50 font-medium" : "bg-white"
-                      }`}
+                      onClick={() => !isStudent && handleRowClick(item)}
+                      className={`transition-colors ${
+                        isStudent
+                          ? "hover:bg-slate-50 cursor-default"
+                          : "hover:bg-blue-50 cursor-pointer"
+                      } ${selectedId === item.id ? "bg-blue-50 font-medium" : "bg-white"}`}
                     >
-                      <td className="py-2.5 px-4">{item.id}</td>
+                      <td className="py-2.5 px-4 font-mono text-xs">{item.id}</td>
                       <td className="py-2.5 px-4 font-medium text-slate-700">
                         {item.studentName}
                       </td>
@@ -358,7 +491,9 @@ export default function AttendanceManagement() {
                   {filteredRecords.length === 0 && (
                     <tr>
                       <td colSpan={5} className="text-center py-8 text-slate-400">
-                        {records.length === 0
+                        {isStudent
+                          ? `No attendance history found for "${currentUser?.name}".`
+                          : records.length === 0
                           ? "No attendance records found. Select a student and click 'Save' above."
                           : "No records match your search."}
                       </td>

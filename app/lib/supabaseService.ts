@@ -11,6 +11,35 @@ import {
 } from "./storage";
 
 // ==========================================
+// CONNECTION TEST
+// ==========================================
+export async function testSupabaseConnection(): Promise<{
+  ok: boolean;
+  message: string;
+}> {
+  try {
+    const { error } = await supabase.from("students").select("id").limit(1);
+    if (error) {
+      if (error.code === "PGRST205") {
+        return {
+          ok: false,
+          message:
+            "Connected to your Supabase project! But tables do not exist yet. Please run the SQL script in Supabase SQL Editor.",
+        };
+      }
+      return { ok: false, message: error.message };
+    }
+    return {
+      ok: true,
+      message: "Successfully connected to your Supabase PostgreSQL database!",
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Network error";
+    return { ok: false, message: msg };
+  }
+}
+
+// ==========================================
 // STUDENTS
 // ==========================================
 export async function getSupabaseStudents(): Promise<Student[]> {
@@ -377,7 +406,7 @@ export async function getSupabaseProfiles(): Promise<User[]> {
     id: row.id,
     name: row.name,
     email: row.email,
-    role: row.role as "Admin" | "Teacher" | "Staff",
+    role: (row.role as "Admin" | "Teacher" | "Student") || "Admin",
     createdAt: row.created_at || "",
   }));
 }
@@ -390,6 +419,24 @@ export async function insertSupabaseProfile(user: User): Promise<boolean> {
     email: user.email,
     role: user.role,
   });
+  return !error;
+}
+
+export async function updateSupabaseProfileRole(
+  userId: string,
+  newRole: "Admin" | "Teacher" | "Student"
+): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  const { error } = await supabase
+    .from("profiles")
+    .update({ role: newRole })
+    .eq("id", userId);
+  return !error;
+}
+
+export async function deleteSupabaseProfile(userId: string): Promise<boolean> {
+  if (!isSupabaseConfigured()) return false;
+  const { error } = await supabase.from("profiles").delete().eq("id", userId);
   return !error;
 }
 

@@ -13,6 +13,7 @@ import {
   BarChart3,
   Settings,
   LogOut,
+  ShieldCheck,
 } from "lucide-react";
 import { confirmDialog, toastSuccess } from "../lib/alert";
 import { logoutUser, useStore, STORAGE_KEYS, User } from "../lib/storage";
@@ -22,15 +23,20 @@ export default function Sidebar() {
   const router = useRouter();
   const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
 
-  const navItems = [
-    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Students", href: "/students", icon: Users },
-    { label: "Classes", href: "/classes", icon: BookOpen },
-    { label: "Teachers", href: "/teachers", icon: GraduationCap },
-    { label: "Fees", href: "/fees", icon: CreditCard },
-    { label: "Attendance", href: "/attendance", icon: CalendarCheck },
-    { label: "Reports", href: "/reports", icon: BarChart3 },
+  const userRole = currentUser?.role || "Admin";
+
+  const allNavItems = [
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["Admin", "Teacher", "Student"] },
+    { label: "Students", href: "/students", icon: Users, roles: ["Admin", "Teacher"] },
+    { label: "Classes", href: "/classes", icon: BookOpen, roles: ["Admin", "Teacher", "Student"] },
+    { label: "Teachers", href: "/teachers", icon: GraduationCap, roles: ["Admin", "Teacher"] },
+    { label: "Fees", href: "/fees", icon: CreditCard, roles: ["Admin", "Student"] },
+    { label: "Attendance", href: "/attendance", icon: CalendarCheck, roles: ["Admin", "Teacher", "Student"] },
+    { label: "Reports", href: "/reports", icon: BarChart3, roles: ["Admin", "Teacher"] },
+    { label: "Users & Roles", href: "/users", icon: ShieldCheck, roles: ["Admin"] },
   ];
+
+  const navItems = allNavItems.filter((item) => item.roles.includes(userRole));
 
   const handleLogout = async () => {
     const confirmed = await confirmDialog({
@@ -95,23 +101,33 @@ export default function Sidebar() {
               <span className="text-white text-xs font-semibold truncate">
                 {currentUser.name || "Admin"}
               </span>
-              <span className="text-[10px] text-slate-400">
-                {currentUser.role || "Administrator"}
+              <span
+                className={`text-[9px] mt-0.5 px-1.5 py-0.2 rounded font-semibold inline-block w-fit ${
+                  userRole === "Admin"
+                    ? "bg-purple-500/20 text-purple-300 border border-purple-500/30"
+                    : userRole === "Teacher"
+                    ? "bg-teal-500/20 text-teal-300 border border-teal-500/30"
+                    : "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                }`}
+              >
+                {userRole === "Admin" ? "👑 Admin" : userRole === "Teacher" ? "👨‍🏫 Teacher" : "🎓 Student"}
               </span>
             </div>
           </div>
         )}
-        <Link
-          href="/settings"
-          className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-[13px] font-medium transition-colors ${
-            pathname === "/settings"
-              ? "bg-blue-600 text-white shadow-sm"
-              : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
-          }`}
-        >
-          <Settings size={18} />
-          <span>Settings</span>
-        </Link>
+        {userRole === "Admin" && (
+          <Link
+            href="/settings"
+            className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-[13px] font-medium transition-colors ${
+              pathname === "/settings"
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-slate-300 hover:bg-slate-800/60 hover:text-white"
+            }`}
+          >
+            <Settings size={18} />
+            <span>Settings</span>
+          </Link>
+        )}
         <button
           type="button"
           onClick={handleLogout}

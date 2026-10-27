@@ -12,9 +12,18 @@ CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
-  role TEXT CHECK (role IN ('Admin', 'Teacher', 'Staff')) DEFAULT 'Admin',
+  role TEXT CHECK (role IN ('Admin', 'Teacher', 'Student')) DEFAULT 'Student',
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Update check constraint if table already exists from previous runs
+DO $$
+BEGIN
+  ALTER TABLE profiles DROP CONSTRAINT IF EXISTS profiles_role_check;
+  ALTER TABLE profiles ADD CONSTRAINT profiles_role_check CHECK (role IN ('Admin', 'Teacher', 'Student'));
+EXCEPTION
+  WHEN OTHERS THEN NULL;
+END $$;
 
 -- 2. Students Table
 CREATE TABLE IF NOT EXISTS students (
@@ -115,7 +124,12 @@ CREATE POLICY "Allow public access to attendance" ON attendance FOR ALL USING (t
 DROP POLICY IF EXISTS "Allow public access to activities" ON activities;
 CREATE POLICY "Allow public access to activities" ON activities FOR ALL USING (true);
 
--- Insert Default Admin Profile
+-- Insert Default Profiles (Admin, Teacher, Student)
 INSERT INTO profiles (id, name, email, role)
-VALUES ('USR-000001', 'System Admin', 'admin@sms.com', 'Admin')
-ON CONFLICT (email) DO NOTHING;
+VALUES 
+  ('USR-000001', 'System Admin', 'admin@sms.com', 'Admin'),
+  ('USR-000002', 'Sir Ahmed Khan', 'teacher@sms.com', 'Teacher'),
+  ('USR-000003', 'Ali Raza', 'student@sms.com', 'Student')
+ON CONFLICT (email) DO UPDATE SET 
+  role = EXCLUDED.role, 
+  name = EXCLUDED.name;

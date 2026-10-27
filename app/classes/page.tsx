@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "../components/Sidebar";
 import WindowHeader from "../components/WindowHeader";
@@ -11,9 +11,18 @@ import {
   Teacher,
   STORAGE_KEYS,
   useStore,
-  getNextClassId,
+  saveClasses,
   logActivity,
+  User,
 } from "../lib/storage";
+import {
+  getSupabaseClasses,
+  insertSupabaseClass,
+  updateSupabaseClass,
+  deleteSupabaseClass,
+  getSupabaseTeachers,
+  insertSupabaseActivity,
+} from "../lib/supabaseService";
 import {
   showWarning,
   showError,
@@ -24,9 +33,33 @@ import {
 
 export default function ClassManagement() {
   const router = useRouter();
-  const [classes, setClasses] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
-  const [teachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
+  const [currentUser] = useStore<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+  const [localClasses, setLocalClasses] = useStore<ClassItem[]>(STORAGE_KEYS.CLASSES, []);
+  const [localTeachers] = useStore<Teacher[]>(STORAGE_KEYS.TEACHERS, []);
+  const [classes, setClasses] = useState<ClassItem[]>(localClasses);
+  const [teachers, setTeachers] = useState<Teacher[]>(localTeachers);
   const [searchTerm, setSearchTerm] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+    (async () => {
+      const [remoteCl, remoteTch] = await Promise.all([
+        getSupabaseClasses(),
+        getSupabaseTeachers(),
+      ]);
+      if (!isMounted) return;
+      if (remoteCl.length > 0) {
+        setClasses(remoteCl);
+        setLocalClasses(remoteCl);
+      }
+      if (remoteTch.length > 0) {
+        setTeachers(remoteTch);
+      }
+    })();
+    return () => {
+      isMounted = false;
+    };
+  }, [setLocalClasses]);
 
   const [formData, setFormData] = useState<ClassItem>({
     id: "",
@@ -43,7 +76,13 @@ export default function ClassManagement() {
   };
 
   const handleNew = () => {
-    const nextId = getNextClassId();
+    const maxNum = classes.reduce((max, c) => {
+      const match = c.id.match(/\d+/);
+      const num = match ? parseInt(match[0], 10) : 0;
+      return num > max ? num : max;
+    }, 0);
+    const nextId = `CLS-${String(maxNum + 1).padStart(4, "0")}`;
+
     setFormData({
       id: nextId,
       name: "",
@@ -52,12 +91,21 @@ export default function ClassManagement() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (currentUser?.role === "Student") {
+      showWarning("Read-Only Mode", "Students can view classes, but only Teachers and Admins can create or modify classes.");
+      return;
+    }
     if (!formData.name.trim()) {
       showWarning("Required Field", "Please enter Class Name.");
       return;
     }
-    const classId = formData.id.trim() || getNextClassId();
+    const maxNum = classes.reduce((max, c) => {
+      const match = c.id.match(/\d+/);
+      const num = match ? parseInt(match[0], 10) : 0;
+      return num > max ? num : max;
+    }, 0);
+    const classId = formData.id.trim() || `CLS-${String(maxNum + 1).padStart(4, "0")}`;
 
     if (classes.some((c) => c.id.toLowerCase() === classId.toLowerCase())) {
       showError(
@@ -68,14 +116,33 @@ export default function ClassManagement() {
     }
 
     const newClass: ClassItem = { ...formData, id: classId };
-    const updated = [...classes, newClass];
-    setClasses(updated);
-    logActivity(`Added class ${newClass.name} - Sec ${newClass.section}`);
-    showSuccess("Class Added!", `Class ${newClass.name} (Sec ${newClass.section}) has been created.`);
+    const savedInSupabase = await insertSupabaseClass(newClass);
+
+    if (savedInSupabase) {
+      await insertSupabaseActivity(`Added class ${newClass.name} - Sec ${newClass.section}`);
+      const refreshed = await getSupabaseClasses();
+      setClasses(refreshed);
+      setLocalClasses(refreshed);
+      showSuccess("Class Added in Supabase!", `Class ${newClass.name} created.`);
+    } else {
+      const updated = [...classes, newClass];
+      setClasses(updated);
+      setLocalClasses(updated);
+      saveClasses(updated);
+      logActivity(`Added class ${newClass.name} - Sec ${newClass.section}`);
+      showWarning(
+        "Saved (Supabase Pending)",
+        `Class ${newClass.name} saved! Run the SQL schema in Supabase to sync.`
+      );
+    }
     handleClear();
   };
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
+    if (currentUser?.role === "Student") {
+      showWarning("Read-Only Mode", "Students cannot edit classes.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a class from the list to update.");
       return;
@@ -85,20 +152,27 @@ export default function ClassManagement() {
       return;
     }
 
-    const exists = classes.some((c) => c.id === formData.id);
-    if (!exists) {
-      showError("Not Found", "Selected class not found in database.");
-      return;
-    }
-
+    const updatedInSupabase = await updateSupabaseClass(formData);
     const updated = classes.map((c) => (c.id === formData.id ? formData : c));
     setClasses(updated);
-    logActivity(`Updated class ${formData.name} (${formData.id})`);
-    showSuccess("Class Updated!", `Class ${formData.name} has been updated.`);
+    setLocalClasses(updated);
+    saveClasses(updated);
+
+    if (updatedInSupabase) {
+      await insertSupabaseActivity(`Updated class ${formData.name} (${formData.id})`);
+      showSuccess("Class Updated in Supabase!", `Class ${formData.name} has been updated.`);
+    } else {
+      logActivity(`Updated class ${formData.name} (${formData.id})`);
+      showSuccess("Class Updated!", `Class ${formData.name} has been updated.`);
+    }
     handleClear();
   };
 
   const handleDelete = async () => {
+    if (currentUser?.role !== "Admin") {
+      showWarning("Admin Access Required", "Only Administrators have permission to delete classes.");
+      return;
+    }
     if (!formData.id) {
       showWarning("No Selection", "Please select a class to delete.");
       return;
@@ -111,8 +185,12 @@ export default function ClassManagement() {
     });
 
     if (confirmed) {
+      await deleteSupabaseClass(formData.id);
+      await insertSupabaseActivity(`Deleted class ${formData.name} (${formData.id})`);
       const updated = classes.filter((c) => c.id !== formData.id);
       setClasses(updated);
+      setLocalClasses(updated);
+      saveClasses(updated);
       logActivity(`Deleted class ${formData.name} (${formData.id})`);
       toastSuccess(`Class "${formData.name}" deleted.`);
       handleClear();
